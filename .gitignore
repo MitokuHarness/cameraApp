@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# その他
+*.log
+*.bak
+*.swp
+
+# 設定ファイル
+camera_viewer.ini
