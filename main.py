@@ -24,11 +24,18 @@ class CameraWidget(QtWidgets.QLabel):
         self.thread = threading.Thread(target=self.update_frame, daemon=True)
         self.thread.start()
 
+    def set_paused(self, paused: bool):
+        self._paused = paused
+
     def update_frame(self):
         auth = f"{self.user}:{self.password}@" if self.user and self.password else ''
         url = f"rtsp://{auth}{self.ip}:{self.port}/stream1"
         cap = cv2.VideoCapture(url)
+        self._paused = False
         while not self._stop:
+            if getattr(self, '_paused', False):
+                time.sleep(0.1)
+                continue
             ret, frame = cap.read()
             if ret:
                 if self.flip_h:
@@ -64,6 +71,51 @@ class CameraWidget(QtWidgets.QLabel):
 
     def close(self):
         self._stop = True
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self.parent().parent().show_camera_fullscreen(self)
+        super().mouseDoubleClickEvent(event)
+
+    def send_ptz_command(self, direction):
+        # Tapo C200 PTZ制御（ONVIF利用）
+        try:
+            from onvif import ONVIFCamera
+            ip = self.ip
+            user = self.user
+            password = self.password
+            onvif_port = 2020  # Tapo C200のONVIFデフォルトポート
+            camera = ONVIFCamera(ip, onvif_port, user, password)
+            media = camera.create_media_service()
+            ptz = camera.create_ptz_service()
+            media_profile = media.GetProfiles()[0]
+            token = media_profile.token
+            # 現在位置取得
+            status = ptz.GetStatus({'ProfileToken': token})
+            pos = status.Position
+            x = pos.PanTilt.x if pos and pos.PanTilt else 0
+            y = pos.PanTilt.y if pos and pos.PanTilt else 0
+            # 移動量
+            step = 0.1
+            if direction == 'up':
+                y += step
+            elif direction == 'down':
+                y -= step
+            elif direction == 'left':
+                x += step  # ←左右を反転
+            elif direction == 'right':
+                x -= step  # ←左右を反転
+            # 範囲制限（-1.0～1.0）
+            x = max(-1.0, min(1.0, x))
+            y = max(-1.0, min(1.0, y))
+            req = ptz.create_type('AbsoluteMove')
+            req.ProfileToken = token
+            req.Position = {'PanTilt': {'x': x, 'y': y}}
+            ptz.AbsoluteMove(req)
+            return True
+        except Exception as e:
+            print(f"PTZコマンド送信失敗: {e}")
+            return False
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -168,6 +220,78 @@ class MainWindow(QtWidgets.QMainWindow):
             self.showFullScreen()
             self.window_btn.setToolTip('ウィンドウモードに切替')
             self.window_btn.setStatusTip('ウィンドウモードに切替')
+
+    def show_camera_fullscreen(self, cam_widget):
+        # 全カメラ一時停止
+        for w in self.cam_widgets:
+            if w is not cam_widget:
+                w.set_paused(True)
+        cam_widget.set_paused(False)
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(cam_widget.name or cam_widget.ip)
+        dlg.setWindowFlags(dlg.windowFlags() | QtCore.Qt.Window)
+        dlg.showFullScreen()
+        main_layout = QtWidgets.QHBoxLayout(dlg)
+        # メイン画像
+        label = QtWidgets.QLabel()
+        label.setAlignment(QtCore.Qt.AlignCenter)
+        main_layout.addWidget(label, stretch=1)
+        # サイドバー（右側）
+        sidebar = QtWidgets.QWidget()
+        sidebar_layout = QtWidgets.QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(10, 40, 10, 40)
+        sidebar_layout.setSpacing(20)
+        # ボタンサイズ統一
+        btn_size = QtCore.QSize(56, 56)
+        # ×
+        close_btn = QtWidgets.QPushButton()
+        close_btn.setIcon(QtGui.QIcon('icons/close.png'))
+        close_btn.setIconSize(btn_size)
+        close_btn.setFixedSize(btn_size)
+        close_btn.setToolTip('全画面を閉じる')
+        close_btn.clicked.connect(dlg.accept)
+        sidebar_layout.addWidget(close_btn, alignment=QtCore.Qt.AlignTop)
+        # ↑
+        up_btn = QtWidgets.QPushButton()
+        up_btn.setIcon(QtGui.QIcon('icons/arrow_up.png'))
+        up_btn.setIconSize(btn_size)
+        up_btn.setFixedSize(btn_size)
+        up_btn.clicked.connect(lambda: cam_widget.send_ptz_command('up'))
+        sidebar_layout.addWidget(up_btn, alignment=QtCore.Qt.AlignTop)
+        # ←
+        left_btn = QtWidgets.QPushButton()
+        left_btn.setIcon(QtGui.QIcon('icons/arrow_left.png'))
+        left_btn.setIconSize(btn_size)
+        left_btn.setFixedSize(btn_size)
+        left_btn.clicked.connect(lambda: cam_widget.send_ptz_command('left'))
+        sidebar_layout.addWidget(left_btn, alignment=QtCore.Qt.AlignTop)
+        # →
+        right_btn = QtWidgets.QPushButton()
+        right_btn.setIcon(QtGui.QIcon('icons/arrow_right.png'))
+        right_btn.setIconSize(btn_size)
+        right_btn.setFixedSize(btn_size)
+        right_btn.clicked.connect(lambda: cam_widget.send_ptz_command('right'))
+        sidebar_layout.addWidget(right_btn, alignment=QtCore.Qt.AlignTop)
+        # ↓
+        down_btn = QtWidgets.QPushButton()
+        down_btn.setIcon(QtGui.QIcon('icons/arrow_down.png'))
+        down_btn.setIconSize(btn_size)
+        down_btn.setFixedSize(btn_size)
+        down_btn.clicked.connect(lambda: cam_widget.send_ptz_command('down'))
+        sidebar_layout.addWidget(down_btn, alignment=QtCore.Qt.AlignTop)
+        sidebar_layout.addStretch(1)
+        main_layout.addWidget(sidebar, stretch=0)
+        def update():
+            pix = cam_widget.pixmap()
+            if pix:
+                label.setPixmap(pix.scaled(label.width(), label.height(), QtCore.Qt.KeepAspectRatio))
+        timer = QtCore.QTimer(dlg)
+        timer.timeout.connect(update)
+        timer.start(50)
+        dlg.exec_()
+        # 全カメラ再開
+        for w in self.cam_widgets:
+            w.set_paused(False)
 
     def closeEvent(self, event):
         for w in self.cam_widgets:
