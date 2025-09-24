@@ -245,21 +245,79 @@ class MainWindow(QtWidgets.QMainWindow):
                 w.set_paused(True)
         cam_widget.set_paused(False)
         cam_widget.set_force_stream('stream2')
-        # 以前の画面遷移をやめて、ダイアログで全画面表示
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(cam_widget.name or cam_widget.ip)
         dlg.setWindowFlags(dlg.windowFlags() | QtCore.Qt.Window)
         dlg.showFullScreen()
         main_layout = QtWidgets.QHBoxLayout(dlg)
+        # スクロール対応画像表示
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
+        scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
+        image_container = QtWidgets.QWidget()
+        image_layout = QtWidgets.QVBoxLayout(image_container)
+        image_layout.setContentsMargins(0,0,0,0)
+        image_layout.setSpacing(0)
         label = QtWidgets.QLabel()
         label.setAlignment(QtCore.Qt.AlignCenter)
         label.setMinimumSize(320, 240)
-        main_layout.addWidget(label, stretch=1)
+        image_layout.addWidget(label)
+        scroll_area.setWidget(image_container)
+        # サイドバーを縦長に表示するため、スクロールエリアとサイドバーをQSplitterで分割
+        btn_size = QtCore.QSize(56, 56)
+        splitter = QtWidgets.QSplitter()
+        splitter.setOrientation(QtCore.Qt.Horizontal)
+        splitter.addWidget(scroll_area)
         sidebar = QtWidgets.QWidget()
         sidebar_layout = QtWidgets.QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(10, 40, 10, 40)
         sidebar_layout.setSpacing(20)
-        btn_size = QtCore.QSize(56, 56)
+        splitter.addWidget(sidebar)
+        splitter.setSizes([dlg.width() - 120, 120])
+        main_layout.addWidget(splitter)
+        # ズーム制御
+        zoom = {'scale': 1.0}
+        def update_image():
+            pix = cam_widget.pixmap()
+            if pix and not pix.isNull():
+                orig_w = pix.width()
+                orig_h = pix.height()
+                w = int(orig_w * zoom['scale'])
+                h = int(orig_h * zoom['scale'])
+                label.setPixmap(pix.scaled(w, h, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+                label.setFixedSize(w, h)
+        # ズームイン
+        zoom_in_btn = QtWidgets.QPushButton()
+        zoom_in_btn.setIcon(QtGui.QIcon('icons/zoom_in.png'))
+        zoom_in_btn.setIconSize(btn_size)
+        zoom_in_btn.setFixedSize(btn_size)
+        zoom_in_btn.setToolTip('ズームイン')
+        def zoom_in():
+            zoom['scale'] = min(zoom['scale'] * 1.2, 8.0)
+            update_image()
+        zoom_in_btn.clicked.connect(zoom_in)
+        sidebar_layout.addWidget(zoom_in_btn, alignment=QtCore.Qt.AlignTop)
+        # ズームアウト
+        zoom_out_btn = QtWidgets.QPushButton()
+        zoom_out_btn.setIcon(QtGui.QIcon('icons/zoom_out.png'))
+        zoom_out_btn.setIconSize(btn_size)
+        zoom_out_btn.setFixedSize(btn_size)
+        zoom_out_btn.setToolTip('ズームアウト')
+        def zoom_out():
+            zoom['scale'] = max(zoom['scale'] / 1.2, 0.2)
+            update_image()
+        zoom_out_btn.clicked.connect(zoom_out)
+        sidebar_layout.addWidget(zoom_out_btn, alignment=QtCore.Qt.AlignTop)
+        # デフォルト（元に戻す）
+        default_btn = QtWidgets.QPushButton('デフォルト')
+        default_btn.setFixedSize(btn_size)
+        default_btn.setToolTip('拡大縮小を元に戻す')
+        def zoom_default():
+            zoom['scale'] = 1.0
+            update_image()
+        default_btn.clicked.connect(zoom_default)
+        sidebar_layout.addWidget(default_btn, alignment=QtCore.Qt.AlignTop)
         # 画質/速度トグルボタン（2行表示・他ボタンと同サイズ）
         toggle_btn = QtWidgets.QPushButton('画質優先\n(高画質)')
         toggle_btn.setCheckable(True)
@@ -275,6 +333,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 cam_widget.set_force_stream('stream1')
         toggle_btn.clicked.connect(toggle_stream)
         sidebar_layout.addWidget(toggle_btn, alignment=QtCore.Qt.AlignTop)
+        # PTZボタン
         close_btn = QtWidgets.QPushButton()
         close_btn.setIcon(QtGui.QIcon('icons/close.png'))
         close_btn.setIconSize(btn_size)
@@ -306,12 +365,60 @@ class MainWindow(QtWidgets.QMainWindow):
         down_btn.setFixedSize(btn_size)
         down_btn.clicked.connect(lambda: cam_widget.send_ptz_command('down'))
         sidebar_layout.addWidget(down_btn, alignment=QtCore.Qt.AlignTop)
-        sidebar_layout.addStretch(1)
-        main_layout.addWidget(sidebar, stretch=0)
+        # 手のひらツール（ドラッグ移動）トグルボタン
+        hand_btn = QtWidgets.QPushButton()
+        hand_btn.setCheckable(True)
+        hand_btn.setIcon(QtGui.QIcon('icons/hand_tool.png'))
+        hand_btn.setIconSize(btn_size)
+        hand_btn.setFixedSize(btn_size)
+        hand_btn.setToolTip('手のひらツール: 画像をドラッグで移動')
+        sidebar_layout.addWidget(hand_btn, alignment=QtCore.Qt.AlignTop)
+        # スクロール位置制御
+        dragging = {'active': False, 'start': None, 'scroll_x': 0, 'scroll_y': 0}
+        def label_mousePressEvent(event):
+            if hand_btn.isChecked() and event.button() == QtCore.Qt.LeftButton:
+                dragging['active'] = True
+                dragging['start'] = event.globalPos()
+                dragging['scroll_x'] = scroll_area.horizontalScrollBar().value()
+                dragging['scroll_y'] = scroll_area.verticalScrollBar().value()
+                label.setCursor(QtGui.QCursor(QtCore.Qt.ClosedHandCursor))
+                event.accept()
+            else:
+                label.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+                QtWidgets.QLabel.mousePressEvent(label, event)
+        def label_mouseMoveEvent(event):
+            if hand_btn.isChecked() and dragging['active'] and event.buttons() & QtCore.Qt.LeftButton:
+                dx = event.globalPos().x() - dragging['start'].x()
+                dy = event.globalPos().y() - dragging['start'].y()
+                scroll_area.horizontalScrollBar().setValue(dragging['scroll_x'] + dx)
+                scroll_area.verticalScrollBar().setValue(dragging['scroll_y'] + dy)
+                event.accept()
+            else:
+                QtWidgets.QLabel.mouseMoveEvent(label, event)
+        def label_mouseReleaseEvent(event):
+            if hand_btn.isChecked() and event.button() == QtCore.Qt.LeftButton:
+                dragging['active'] = False
+                label.setCursor(QtGui.QCursor(QtCore.Qt.OpenHandCursor))
+                event.accept()
+            else:
+                label.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+                QtWidgets.QLabel.mouseReleaseEvent(label, event)
+        label.mousePressEvent = label_mousePressEvent
+        label.mouseMoveEvent = label_mouseMoveEvent
+        label.mouseReleaseEvent = label_mouseReleaseEvent
+        def update_hand_cursor():
+            if hand_btn.isChecked():
+                label.setCursor(QtGui.QCursor(QtCore.Qt.OpenHandCursor))
+            else:
+                label.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+        hand_btn.toggled.connect(update_hand_cursor)
+        # 画像更新タイマー
         def update():
             pix = cam_widget.pixmap()
             if pix and not pix.isNull():
-                label.setPixmap(pix.scaled(label.width(), label.height(), QtCore.Qt.KeepAspectRatio))
+                w = int(label.width() * zoom['scale'])
+                h = int(label.height() * zoom['scale'])
+                label.setPixmap(pix.scaled(w, h, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
         timer = QtCore.QTimer(dlg)
         timer.timeout.connect(update)
         timer.start(50)
