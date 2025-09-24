@@ -404,8 +404,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QLabel.mousePressEvent(label, event)
         def label_mouseMoveEvent(event):
             if dragging['active'] and event.buttons() & QtCore.Qt.LeftButton:
-                dx = event.globalPos().x() - dragging['start'].x()
-                dy = event.globalPos().y() - dragging['start'].y()
+                dx = -(event.globalPos().x() - dragging['start'].x())  # 反転
+                dy = -(event.globalPos().y() - dragging['start'].y())  # 反転
                 scroll_area.horizontalScrollBar().setValue(dragging['scroll_x'] + dx)
                 scroll_area.verticalScrollBar().setValue(dragging['scroll_y'] + dy)
                 event.accept()
