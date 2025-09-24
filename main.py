@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from PyQt5 import QtWidgets, QtCore, QtGui
 import sys
 from camera_viewer.settings import Settings
@@ -96,7 +97,7 @@ class CameraWidget(QtWidgets.QLabel):
         super().mouseDoubleClickEvent(event)
 
     def send_ptz_command(self, direction):
-        # Tapo C200 PTZ制御（ONVIF利用）
+    # Tapo C200 PTZ制御（ONVIF利用）
         try:
             from onvif import ONVIFCamera
             ip = self.ip
@@ -145,7 +146,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def init_ui(self):
         menubar = self.menuBar()
-        # ボタンサイズ設定（1.5倍: 36x36px）
+    # ボタンサイズ設定（1.5倍: 36x36px）
         btn_size = QtCore.QSize(36, 36)
 
         # 歯車アイコンの設定ボタン（左上）
@@ -159,7 +160,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.settings_btn.setFixedSize(btn_size)
         menubar.setCornerWidget(self.settings_btn, QtCore.Qt.TopLeftCorner)
 
-        # フルスクリーン（ウィンドウモード）ボタン（右上の左側）
+    # フルスクリーン（ウィンドウモード）ボタン（右上の左側）
         self.window_btn = QtWidgets.QToolButton(self)
         self.window_btn.setIcon(QtGui.QIcon('icons/window.png'))
         self.window_btn.setIconSize(btn_size)
@@ -168,7 +169,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.window_btn.setStatusTip('ウィンドウモードに切替')
         self.window_btn.clicked.connect(self.toggle_window_mode)
 
-        # 閉じるボタン（右上）
+    # 閉じるボタン（右上）
         self.close_btn = QtWidgets.QToolButton(self)
         self.close_btn.setIcon(QtGui.QIcon('icons/close.png'))
         self.close_btn.setIconSize(btn_size)
@@ -177,7 +178,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.close_btn.setStatusTip('アプリを終了')
         self.close_btn.clicked.connect(self.close)
 
-        # 右上にウィンドウモード・閉じるボタンを横並びで配置
+        # 蜿ｳ荳翫↓繧ｦ繧｣繝ｳ繝峨え繝｢繝ｼ繝峨�ｻ髢峨§繧九�懊ち繝ｳ繧呈ｨｪ荳ｦ縺ｳ縺ｧ驟咲ｽｮ
         right_widget = QtWidgets.QWidget()
         right_layout = QtWidgets.QHBoxLayout(right_widget)
         right_layout.setContentsMargins(0,0,0,0)
@@ -194,13 +195,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.load_cameras()
 
     def load_cameras(self):
-        # 既存ウィジェット削除
+    # 既存ウィジェット削除
         for w in self.cam_widgets:
             w.close()
             self.grid_layout.removeWidget(w)
             w.deleteLater()
         self.cam_widgets.clear()
-        # ONのカメラのみリスト化
+    # ONのカメラのみリスト化
         cam_data = []
         for ip, v in self.settings.get_cameras().items():
             name, flip_h, flip_v, enable, user, password, port = v
@@ -210,11 +211,11 @@ class MainWindow(QtWidgets.QMainWindow):
         n = len(cam_data)
         if n == 0:
             return
-        # 分割数計算（例: 2→1x2, 4→2x2, 5→2x3, 9→3x3）
+    # 分割数計算（例: 2→1x2, 4→2x2, 5→2x3, 9→3x3）
         import math
         cols = math.ceil(math.sqrt(n))
         rows = math.ceil(n / cols)
-        # グリッドに追加
+    # グリッドに追加
         for idx, (ip, user, password, port, flip_h, flip_v, name) in enumerate(cam_data):
             widget = CameraWidget(ip, user, password, port, flip_h, flip_v, name, stream='stream2')
             row = idx // cols
@@ -227,19 +228,32 @@ class MainWindow(QtWidgets.QMainWindow):
         if dlg.exec_():
             self.settings.load()
             self.load_cameras()
-        # 設定変更後の再描画等
+    # 設定変更後の再描画等
 
     def toggle_window_mode(self):
         if self.isFullScreen():
             self.showNormal()
-            self.window_btn.setToolTip('全画面モードに切替')
-            self.window_btn.setStatusTip('全画面モードに切替')
-        else:
-            self.showFullScreen()
             self.window_btn.setToolTip('ウィンドウモードに切替')
             self.window_btn.setStatusTip('ウィンドウモードに切替')
+        else:
+            self.showFullScreen()
+            self.window_btn.setToolTip('フルスクリーンに切替')
+            self.window_btn.setStatusTip('フルスクリーンに切替')
 
     def show_camera_fullscreen(self, cam_widget):
+        # スクロール位置制御
+        dragging = {'active': False, 'start': None, 'scroll_x': 0, 'scroll_y': 0}
+        def label_mousePressEvent(event):
+            if event.button() == QtCore.Qt.LeftButton:
+                dragging['active'] = True
+                dragging['start'] = event.globalPos()
+                dragging['scroll_x'] = scroll_area.horizontalScrollBar().value()
+                dragging['scroll_y'] = scroll_area.verticalScrollBar().value()
+                label.setCursor(QtGui.QCursor(QtCore.Qt.ClosedHandCursor))
+                event.accept()
+            else:
+                label.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+                QtWidgets.QLabel.mousePressEvent(label, event)
         for w in self.cam_widgets:
             if w is not cam_widget:
                 w.set_paused(True)
@@ -250,7 +264,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.setWindowFlags(dlg.windowFlags() | QtCore.Qt.Window)
         dlg.showFullScreen()
         main_layout = QtWidgets.QHBoxLayout(dlg)
-        # スクロール対応画像表示
+    # スクロール対応画像表示
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
@@ -309,6 +323,7 @@ class MainWindow(QtWidgets.QMainWindow):
             update_image()
         zoom_out_btn.clicked.connect(zoom_out)
         sidebar_layout.addWidget(zoom_out_btn, alignment=QtCore.Qt.AlignTop)
+        # --- デフォルト（元に戻す）ボタン生成は一度だけ ---
         # デフォルト（元に戻す）
         default_btn = QtWidgets.QPushButton('デフォルト')
         default_btn.setFixedSize(btn_size)
@@ -318,7 +333,15 @@ class MainWindow(QtWidgets.QMainWindow):
             update_image()
         default_btn.clicked.connect(zoom_default)
         sidebar_layout.addWidget(default_btn, alignment=QtCore.Qt.AlignTop)
-        # 画質/速度トグルボタン（2行表示・他ボタンと同サイズ）
+        # --- サイドバー用ボタン生成（ローカル変数化） ---
+        # 閉じるボタン
+        close_btn = QtWidgets.QPushButton()
+        close_btn.setIcon(QtGui.QIcon('icons/close.png'))
+        close_btn.setIconSize(btn_size)
+        close_btn.setFixedSize(btn_size)
+        close_btn.setToolTip('全画面を閉じる')
+        close_btn.clicked.connect(dlg.accept)
+        # 解像度（画質/速度トグル）ボタン
         toggle_btn = QtWidgets.QPushButton('画質優先\n(高画質)')
         toggle_btn.setCheckable(True)
         toggle_btn.setChecked(False)
@@ -332,51 +355,44 @@ class MainWindow(QtWidgets.QMainWindow):
                 toggle_btn.setText('画質優先\n(高画質)')
                 cam_widget.set_force_stream('stream1')
         toggle_btn.clicked.connect(toggle_stream)
-        sidebar_layout.addWidget(toggle_btn, alignment=QtCore.Qt.AlignTop)
-        # PTZボタン
-        close_btn = QtWidgets.QPushButton()
-        close_btn.setIcon(QtGui.QIcon('icons/close.png'))
-        close_btn.setIconSize(btn_size)
-        close_btn.setFixedSize(btn_size)
-        close_btn.setToolTip('全画面を閉じる')
-        close_btn.clicked.connect(dlg.accept)
-        sidebar_layout.addWidget(close_btn, alignment=QtCore.Qt.AlignTop)
+        # PTZ ↑
         up_btn = QtWidgets.QPushButton()
         up_btn.setIcon(QtGui.QIcon('icons/arrow_up.png'))
         up_btn.setIconSize(btn_size)
         up_btn.setFixedSize(btn_size)
         up_btn.clicked.connect(lambda: cam_widget.send_ptz_command('up'))
-        sidebar_layout.addWidget(up_btn, alignment=QtCore.Qt.AlignTop)
+        # PTZ ←
         left_btn = QtWidgets.QPushButton()
         left_btn.setIcon(QtGui.QIcon('icons/arrow_left.png'))
         left_btn.setIconSize(btn_size)
         left_btn.setFixedSize(btn_size)
         left_btn.clicked.connect(lambda: cam_widget.send_ptz_command('left'))
-        sidebar_layout.addWidget(left_btn, alignment=QtCore.Qt.AlignTop)
+        # PTZ →
         right_btn = QtWidgets.QPushButton()
         right_btn.setIcon(QtGui.QIcon('icons/arrow_right.png'))
         right_btn.setIconSize(btn_size)
         right_btn.setFixedSize(btn_size)
         right_btn.clicked.connect(lambda: cam_widget.send_ptz_command('right'))
-        sidebar_layout.addWidget(right_btn, alignment=QtCore.Qt.AlignTop)
+        # PTZ ↓
         down_btn = QtWidgets.QPushButton()
         down_btn.setIcon(QtGui.QIcon('icons/arrow_down.png'))
         down_btn.setIconSize(btn_size)
         down_btn.setFixedSize(btn_size)
         down_btn.clicked.connect(lambda: cam_widget.send_ptz_command('down'))
+        # --- 並び順にサイドバーへ追加 ---
+        sidebar_layout.addWidget(close_btn, alignment=QtCore.Qt.AlignTop)
+        sidebar_layout.addWidget(toggle_btn, alignment=QtCore.Qt.AlignTop)
+        sidebar_layout.addWidget(up_btn, alignment=QtCore.Qt.AlignTop)
+        sidebar_layout.addWidget(left_btn, alignment=QtCore.Qt.AlignTop)
+        sidebar_layout.addWidget(right_btn, alignment=QtCore.Qt.AlignTop)
         sidebar_layout.addWidget(down_btn, alignment=QtCore.Qt.AlignTop)
-        # 手のひらツール（ドラッグ移動）トグルボタン
-        hand_btn = QtWidgets.QPushButton()
-        hand_btn.setCheckable(True)
-        hand_btn.setIcon(QtGui.QIcon('icons/hand_tool.png'))
-        hand_btn.setIconSize(btn_size)
-        hand_btn.setFixedSize(btn_size)
-        hand_btn.setToolTip('手のひらツール: 画像をドラッグで移動')
-        sidebar_layout.addWidget(hand_btn, alignment=QtCore.Qt.AlignTop)
-        # スクロール位置制御
-        dragging = {'active': False, 'start': None, 'scroll_x': 0, 'scroll_y': 0}
+        sidebar_layout.addWidget(default_btn, alignment=QtCore.Qt.AlignTop)
+        sidebar_layout.addWidget(zoom_in_btn, alignment=QtCore.Qt.AlignTop)
+        sidebar_layout.addWidget(zoom_out_btn, alignment=QtCore.Qt.AlignTop)
+        # 手のひらツール関連のボタン生成・追加・分岐はすべて削除
+        # mouseイベントは常時ドラッグ移動有効化
         def label_mousePressEvent(event):
-            if hand_btn.isChecked() and event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.LeftButton:
                 dragging['active'] = True
                 dragging['start'] = event.globalPos()
                 dragging['scroll_x'] = scroll_area.horizontalScrollBar().value()
@@ -387,7 +403,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 label.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
                 QtWidgets.QLabel.mousePressEvent(label, event)
         def label_mouseMoveEvent(event):
-            if hand_btn.isChecked() and dragging['active'] and event.buttons() & QtCore.Qt.LeftButton:
+            if dragging['active'] and event.buttons() & QtCore.Qt.LeftButton:
                 dx = event.globalPos().x() - dragging['start'].x()
                 dy = event.globalPos().y() - dragging['start'].y()
                 scroll_area.horizontalScrollBar().setValue(dragging['scroll_x'] + dx)
@@ -396,7 +412,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 QtWidgets.QLabel.mouseMoveEvent(label, event)
         def label_mouseReleaseEvent(event):
-            if hand_btn.isChecked() and event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.LeftButton:
                 dragging['active'] = False
                 label.setCursor(QtGui.QCursor(QtCore.Qt.OpenHandCursor))
                 event.accept()
@@ -406,13 +422,9 @@ class MainWindow(QtWidgets.QMainWindow):
         label.mousePressEvent = label_mousePressEvent
         label.mouseMoveEvent = label_mouseMoveEvent
         label.mouseReleaseEvent = label_mouseReleaseEvent
-        def update_hand_cursor():
-            if hand_btn.isChecked():
-                label.setCursor(QtGui.QCursor(QtCore.Qt.OpenHandCursor))
-            else:
-                label.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
-        hand_btn.toggled.connect(update_hand_cursor)
-        # 画像更新タイマー
+        # ダイアログ表示時は常に手のひらカーソル
+        label.setCursor(QtGui.QCursor(QtCore.Qt.OpenHandCursor))
+    # 画像更新タイマー
         def update():
             pix = cam_widget.pixmap()
             if pix and not pix.isNull():
