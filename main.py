@@ -6,9 +6,10 @@ from camera_viewer.utils import get_camera_stream
 import threading
 import time
 import cv2
+import sip
 
 class CameraWidget(QtWidgets.QLabel):
-    def __init__(self, ip, user='', password='', port='554', flip_h=False, flip_v=False, name='', parent=None):
+    def __init__(self, ip, user='', password='', port='554', flip_h=False, flip_v=False, name='', parent=None, stream='stream2'):
         super().__init__(parent)
         self.ip = ip
         self.user = user
@@ -17,57 +18,74 @@ class CameraWidget(QtWidgets.QLabel):
         self.flip_h = flip_h
         self.flip_v = flip_v
         self.name = name
+        self.stream = stream  # 'stream1' or 'stream2'
         self.setAlignment(QtCore.Qt.AlignCenter)
-        self.setText(f"{ip}\n接続中...")
+        self.setText(f"{self.name}\n接続中...")
         self._stop = False
-        self.frame = None
+        self._paused = False
+        self._force_stream = None
         self.thread = threading.Thread(target=self.update_frame, daemon=True)
         self.thread.start()
 
     def set_paused(self, paused: bool):
         self._paused = paused
 
+    def set_force_stream(self, stream):
+        self._force_stream = stream
+
+    def get_current_stream(self):
+        return self._force_stream if self._force_stream else self.stream
+
     def update_frame(self):
-        auth = f"{self.user}:{self.password}@" if self.user and self.password else ''
-        url = f"rtsp://{auth}{self.ip}:{self.port}/stream1"
-        cap = cv2.VideoCapture(url)
-        self._paused = False
+        import weakref
+        self_ref = weakref.ref(self)
         while not self._stop:
             if getattr(self, '_paused', False):
                 time.sleep(0.1)
                 continue
-            ret, frame = cap.read()
-            if ret:
-                if self.flip_h:
-                    frame = cv2.flip(frame, 1)
-                if self.flip_v:
-                    frame = cv2.flip(frame, 0)
-                # カメラ名を左上に黒背景＋白文字で日本語対応描画
-                if self.name:
-                    try:
-                        from PIL import ImageFont, ImageDraw, Image
-                        import numpy as np
-                        pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                        font_path = "C:/Windows/Fonts/msgothic.ttc"
-                        font = ImageFont.truetype(font_path, 28)
-                        draw = ImageDraw.Draw(pil_img)
-                        text_size = draw.textbbox((0,0), self.name, font=font)
-                        x0, y0, x1, y1 = text_size
-                        # 黒背景
-                        draw.rectangle([8, 3, 8 + (x1-x0) + 8, 3 + (y1-y0) + 8], fill=(0,0,0,200))
-                        draw.text((12, 7), self.name, font=font, fill=(255,255,255))
-                        frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-                    except Exception as e:
-                        cv2.putText(frame, self.name, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2, cv2.LINE_AA)
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                h, w, ch = rgb.shape
-                img = QtGui.QImage(rgb.data, w, h, ch * w, QtGui.QImage.Format_RGB888)
-                pix = QtGui.QPixmap.fromImage(img)
-                self.setPixmap(pix.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatio))
-            else:
-                self.setText(f"{self.ip}\n取得失敗")
-            time.sleep(1/20)
-        cap.release()
+            stream = self.get_current_stream()
+            auth = f"{self.user}:{self.password}@" if self.user and self.password else ''
+            url = f"rtsp://{auth}{self.ip}:{self.port}/{stream}"
+            cap = cv2.VideoCapture(url)
+            while not self._stop and not getattr(self, '_paused', False):
+                # stream切替要求があればbreak
+                if self._force_stream and self._force_stream != stream:
+                    break
+                ret, frame = cap.read()
+                if ret:
+                    if self.flip_h:
+                        frame = cv2.flip(frame, 1)
+                    if self.flip_v:
+                        frame = cv2.flip(frame, 0)
+                    # カメラ名を左上に白文字＋黒背景で描画（日本語対応）
+                    if self.name:
+                        try:
+                            from PIL import ImageFont, ImageDraw, Image
+                            import numpy as np
+                            pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                            font_path = "C:/Windows/Fonts/msgothic.ttc"
+                            font = ImageFont.truetype(font_path, 28)
+                            draw = ImageDraw.Draw(pil_img)
+                            text_size = draw.textbbox((0,0), self.name, font=font)
+                            x0, y0, x1, y1 = text_size
+                            draw.rectangle([8, 3, 8 + (x1-x0) + 8, 3 + (y1-y0) + 8], fill=(0,0,0,200))
+                            draw.text((12, 7), self.name, font=font, fill=(255,255,255))
+                            frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+                        except Exception as e:
+                            cv2.putText(frame, self.name, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2, cv2.LINE_AA)
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = rgb.shape
+                    img = QtGui.QImage(rgb.data, w, h, ch * w, QtGui.QImage.Format_RGB888)
+                    pix = QtGui.QPixmap.fromImage(img)
+                    widget = self_ref()
+                    if widget is not None:
+                        widget.setPixmap(pix.scaled(widget.width(), widget.height(), QtCore.Qt.KeepAspectRatio))
+                else:
+                    widget = self_ref()
+                    if widget is not None:
+                        widget.setText(f"{self.ip}\n取得失敗")
+                time.sleep(1/20)
+            cap.release()
 
     def close(self):
         self._stop = True
@@ -198,7 +216,7 @@ class MainWindow(QtWidgets.QMainWindow):
         rows = math.ceil(n / cols)
         # グリッドに追加
         for idx, (ip, user, password, port, flip_h, flip_v, name) in enumerate(cam_data):
-            widget = CameraWidget(ip, user, password, port, flip_h, flip_v, name)
+            widget = CameraWidget(ip, user, password, port, flip_h, flip_v, name, stream='stream2')
             row = idx // cols
             col = idx % cols
             self.grid_layout.addWidget(widget, row, col)
@@ -222,28 +240,41 @@ class MainWindow(QtWidgets.QMainWindow):
             self.window_btn.setStatusTip('ウィンドウモードに切替')
 
     def show_camera_fullscreen(self, cam_widget):
-        # 全カメラ一時停止
         for w in self.cam_widgets:
             if w is not cam_widget:
                 w.set_paused(True)
         cam_widget.set_paused(False)
+        cam_widget.set_force_stream('stream2')
+        # 以前の画面遷移をやめて、ダイアログで全画面表示
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(cam_widget.name or cam_widget.ip)
         dlg.setWindowFlags(dlg.windowFlags() | QtCore.Qt.Window)
         dlg.showFullScreen()
         main_layout = QtWidgets.QHBoxLayout(dlg)
-        # メイン画像
         label = QtWidgets.QLabel()
         label.setAlignment(QtCore.Qt.AlignCenter)
+        label.setMinimumSize(320, 240)
         main_layout.addWidget(label, stretch=1)
-        # サイドバー（右側）
         sidebar = QtWidgets.QWidget()
         sidebar_layout = QtWidgets.QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(10, 40, 10, 40)
         sidebar_layout.setSpacing(20)
-        # ボタンサイズ統一
         btn_size = QtCore.QSize(56, 56)
-        # ×
+        # 画質/速度トグルボタン（2行表示・他ボタンと同サイズ）
+        toggle_btn = QtWidgets.QPushButton('画質優先\n(高画質)')
+        toggle_btn.setCheckable(True)
+        toggle_btn.setChecked(False)
+        toggle_btn.setFixedSize(btn_size)
+        toggle_btn.setToolTip('画質優先: stream1 / 速度優先: stream2')
+        def toggle_stream():
+            if toggle_btn.isChecked():
+                toggle_btn.setText('速度優先\n(低遅延)')
+                cam_widget.set_force_stream('stream2')
+            else:
+                toggle_btn.setText('画質優先\n(高画質)')
+                cam_widget.set_force_stream('stream1')
+        toggle_btn.clicked.connect(toggle_stream)
+        sidebar_layout.addWidget(toggle_btn, alignment=QtCore.Qt.AlignTop)
         close_btn = QtWidgets.QPushButton()
         close_btn.setIcon(QtGui.QIcon('icons/close.png'))
         close_btn.setIconSize(btn_size)
@@ -251,28 +282,24 @@ class MainWindow(QtWidgets.QMainWindow):
         close_btn.setToolTip('全画面を閉じる')
         close_btn.clicked.connect(dlg.accept)
         sidebar_layout.addWidget(close_btn, alignment=QtCore.Qt.AlignTop)
-        # ↑
         up_btn = QtWidgets.QPushButton()
         up_btn.setIcon(QtGui.QIcon('icons/arrow_up.png'))
         up_btn.setIconSize(btn_size)
         up_btn.setFixedSize(btn_size)
         up_btn.clicked.connect(lambda: cam_widget.send_ptz_command('up'))
         sidebar_layout.addWidget(up_btn, alignment=QtCore.Qt.AlignTop)
-        # ←
         left_btn = QtWidgets.QPushButton()
         left_btn.setIcon(QtGui.QIcon('icons/arrow_left.png'))
         left_btn.setIconSize(btn_size)
         left_btn.setFixedSize(btn_size)
         left_btn.clicked.connect(lambda: cam_widget.send_ptz_command('left'))
         sidebar_layout.addWidget(left_btn, alignment=QtCore.Qt.AlignTop)
-        # →
         right_btn = QtWidgets.QPushButton()
         right_btn.setIcon(QtGui.QIcon('icons/arrow_right.png'))
         right_btn.setIconSize(btn_size)
         right_btn.setFixedSize(btn_size)
         right_btn.clicked.connect(lambda: cam_widget.send_ptz_command('right'))
         sidebar_layout.addWidget(right_btn, alignment=QtCore.Qt.AlignTop)
-        # ↓
         down_btn = QtWidgets.QPushButton()
         down_btn.setIcon(QtGui.QIcon('icons/arrow_down.png'))
         down_btn.setIconSize(btn_size)
@@ -283,15 +310,15 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(sidebar, stretch=0)
         def update():
             pix = cam_widget.pixmap()
-            if pix:
+            if pix and not pix.isNull():
                 label.setPixmap(pix.scaled(label.width(), label.height(), QtCore.Qt.KeepAspectRatio))
         timer = QtCore.QTimer(dlg)
         timer.timeout.connect(update)
         timer.start(50)
         dlg.exec_()
-        # 全カメラ再開
         for w in self.cam_widgets:
             w.set_paused(False)
+            w.set_force_stream(None)
 
     def closeEvent(self, event):
         for w in self.cam_widgets:
